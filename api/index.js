@@ -10,7 +10,7 @@ export default async function handler(req, res) {
   try {
     const body = req.body || {};
     
-    // API Key 추출
+    // API Key 추출 (Authorization Bearer, x-goog-api-key, query parameter)
     const authHeader = req.headers.authorization || '';
     let apiKey = authHeader.replace('Bearer ', '').trim();
 
@@ -40,7 +40,8 @@ export default async function handler(req, res) {
       ]
     };
 
-    const modelName = body.model || 'gemini-3.8-flash';
+    // Immersive Translate에서 지정한 모델명 사용
+    const modelName = body.model || 'gemini-1.5-flash';
     const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
     const response = await fetch(targetUrl, {
@@ -49,7 +50,17 @@ export default async function handler(req, res) {
       body: JSON.stringify(geminiPayload)
     });
 
-    const data = await response.json();
+    // 텍스트로 먼저 받아본 뒤 파싱 (Unexpected end of JSON 방지)
+    const rawText = await response.text();
+    let data;
+    try {
+      data = JSON.parse(rawText);
+    } catch (e) {
+      return res.status(response.status || 500).json({
+        error: "Gemini API 응답 파싱 실패",
+        rawResponseBody: rawText
+      });
+    }
 
     if (!response.ok) {
       return res.status(response.status).json(data);
