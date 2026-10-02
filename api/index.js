@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // CORS 및 Preflight 처리
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', '*');
@@ -11,7 +10,7 @@ export default async function handler(req, res) {
   try {
     const body = req.body || {};
     
-    // API Key 추출 (Authorization Bearer, x-goog-api-key, Query parameter 순서로 확인)
+    // API Key 추출
     const authHeader = req.headers.authorization || '';
     let apiKey = authHeader.replace('Bearer ', '').trim();
 
@@ -20,16 +19,16 @@ export default async function handler(req, res) {
     }
 
     if (!apiKey) {
-      return res.status(401).json({ error: "API Key가 전달되지 않았습니다. Immersive Translate 설정의 API Key를 확인해주세요." });
+      return res.status(401).json({ error: "API Key가 전달되지 않았습니다." });
     }
 
-    // OpenAI 형식의 messages를 Gemini 형식의 contents로 변환
+    // OpenAI messages -> Gemini contents 변환
     const contents = (body.messages || []).map(msg => ({
       role: msg.role === 'user' ? 'user' : 'model',
       parts: [{ text: msg.content || '' }]
     }));
 
-    // Gemini Native 규격 payload 구성 (safetySettings 포함)
+    // Gemini Native 규격 payload
     const geminiPayload = {
       contents: contents.length > 0 ? contents : [{ parts: [{ text: "Hello" }] }],
       safetySettings: [
@@ -41,7 +40,6 @@ export default async function handler(req, res) {
       ]
     };
 
-    // Immersive Translate에서 요청한 모델명 사용 또는 기본값 gemini-3.8-flash
     const modelName = body.model || 'gemini-3.8-flash';
     const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
@@ -57,7 +55,6 @@ export default async function handler(req, res) {
       return res.status(response.status).json(data);
     }
 
-    // Gemini 응답을 OpenAI chat/completions 표준 포맷으로 반환
     const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     
     const openAiResponse = {
