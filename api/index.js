@@ -9,7 +9,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1. 요청 Body 파싱 안전화
+    // 1. 요청 Body 안전 파싱
     let body = req.body || {};
     if (typeof body === 'string') {
       try {
@@ -19,31 +19,27 @@ export default async function handler(req, res) {
       }
     }
 
-    // 2. API Key 파싱 (Immersive Translate가 전송하는 모든 위치 전수 조사)
+    // 2. API Key 추출 및 강력 정제 (Bearer, 따옴표, 양끝 공백 완전 제거)
     const headers = req.headers || {};
     const authHeader = headers.authorization || headers.Authorization || '';
     
-    let apiKey = '';
+    let rawApiKey = '';
 
-    // (1) Bearer 토큰 형태
     if (authHeader) {
-      apiKey = authHeader.replace(/^Bearer\s+/i, '').trim();
-    }
-    // (2) x-goog-api-key 헤더 형태
-    if (!apiKey) {
-      apiKey = headers['x-goog-api-key'] || headers['X-Goog-Api-Key'] || '';
-    }
-    // (3) api-key / x-api-key 헤더 형태
-    if (!apiKey) {
-      apiKey = headers['api-key'] || headers['x-api-key'] || '';
-    }
-    // (4) URL Query 파라미터 (?key= 또는 ?api_key=)
-    if (!apiKey && req.query) {
-      apiKey = req.query.key || req.query.api_key || req.query.apiKey || '';
+      rawApiKey = authHeader;
+    } else if (headers['x-goog-api-key'] || headers['X-Goog-Api-Key']) {
+      rawApiKey = headers['x-goog-api-key'] || headers['X-Goog-Api-Key'];
+    } else if (headers['api-key'] || headers['x-api-key']) {
+      rawApiKey = headers['api-key'] || headers['x-api-key'];
+    } else if (req.query && (req.query.key || req.query.api_key || req.query.apiKey)) {
+      rawApiKey = req.query.key || req.query.api_key || req.query.apiKey;
     }
 
-    // 따옴표 및 양끝 공백 정제
-    apiKey = apiKey.replace(/^["']|["']$/g, '').trim();
+    // "Bearer AIzaSy..." -> "AIzaSy..." (순수 키만 정제)
+    let apiKey = rawApiKey
+      .replace(/^Bearer\s+/i, '')
+      .replace(/^["']|["']$/g, '')
+      .trim();
 
     if (!apiKey) {
       return res.status(401).json({ 
@@ -69,18 +65,17 @@ export default async function handler(req, res) {
       ]
     };
 
-    // 5. 모델명 정제 (google/ 접두사 제거)
-    const rawModel = body.model || 'gemini-2.5-flash';
-    let cleanModel = rawModel.replace(/^google\//i, '').trim();
+    // 5. 모델명 정제 (2.5 강제 치환 없이, google/ 접두사만 제거하여 요청받은 모델명 그대로 사용)
+    const rawModel = body.model || 'gemini-3.8-flash';
+    const cleanModel = rawModel.replace(/^google\//i, '').trim();
 
-    // 6. Google Gemini API 호출 (URL 쿼리 + Header 양쪽으로 Key 전달)
+    // 6. Google Gemini API 호출
     const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
 
     const response = await fetch(targetUrl, {
       method: 'POST',
       headers: { 
-        'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify(geminiPayload)
     });
@@ -91,7 +86,7 @@ export default async function handler(req, res) {
       data = JSON.parse(rawText);
     } catch (e) {
       return res.status(response.status || 500).json({
-        error: `Google Gemini API 응답 해석 실패 (${response.status})`,
+        error: `Google Gemini API 응답 파싱 실패 (${response.status})`,
         rawResponseBody: rawText
       });
     }
@@ -102,7 +97,7 @@ export default async function handler(req, res) {
 
     const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     
-    // 7. OpenAI 규격으로 반환
+    // 7. OpenAI 규격으로 변환하여 반환
     const openAiResponse = {
       id: 'chatcmpl-' + Date.now(),
       object: 'chat.completion',
