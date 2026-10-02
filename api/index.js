@@ -19,7 +19,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // 2. API Key (Vercel Key vck_...) 추출
+    // 2. Vercel AI Gateway Key (vck_...) 추출
     const headers = req.headers || {};
     const authHeader = headers.authorization || headers.Authorization || '';
     
@@ -46,31 +46,22 @@ export default async function handler(req, res) {
       });
     }
 
-    // 3. OpenAI messages -> Gemini contents 규격 변환
-    const contents = (body.messages || []).map(msg => ({
-      role: msg.role === 'user' ? 'user' : 'model',
-      parts: [{ text: msg.content || '' }]
-    }));
+    // 3. 모델명 정제 (Vercel Gateway 규격: google/ 접두사가 필요함)
+    let modelName = body.model || 'gemini-2.5-flash';
+    if (!modelName.startsWith('google/')) {
+      modelName = `google/${modelName}`;
+    }
 
-    // 4. Gemini Native 규격 payload (safetySettings BLOCK_NONE 적용)
-    const geminiPayload = {
-      contents: contents.length > 0 ? contents : [{ parts: [{ text: "Hello" }] }],
-      safetySettings: [
-        { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
-        { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
-        { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
-        { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-        { category: 'HARM_CATEGORY_CIVIC_INTEGRITY', threshold: 'BLOCK_NONE' }
-      ]
+    // 4. Vercel AI Gateway OpenAI 표준 페이로드 구성
+    const gatewayPayload = {
+      model: modelName,
+      messages: body.messages || [{ role: 'user', content: 'Hello' }],
+      temperature: body.temperature ?? 0.7,
+      stream: false
     };
 
-    // 5. 모델명 정제 (google/ 접두사 제거)
-    const rawModel = body.model || 'gemini-3.8-flash';
-    const cleanModel = rawModel.replace(/^google\//i, '').trim();
-
-    // 6. Vercel AI Gateway 엔드포인트 호출 (vck_... 키 적용)
-    // Vercel AI Gateway를 거쳐 Google Gemini로 안전하게 포워딩됩니다.
-    const targetUrl = `https://ai.vercel.dev/v1/models/${cleanModel}:generateContent`;
+    // 5. Vercel AI Gateway 공식 표준 엔드포인트 호출
+    const targetUrl = 'https://ai-gateway.vercel.sh/v1/chat/completions';
 
     const response = await fetch(targetUrl, {
       method: 'POST',
@@ -78,7 +69,7 @@ export default async function handler(req, res) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`
       },
-      body: JSON.stringify(geminiPayload)
+      body: JSON.stringify(gatewayPayload)
     });
 
     const rawText = await response.text();
@@ -96,27 +87,8 @@ export default async function handler(req, res) {
       return res.status(response.status).json(data);
     }
 
-    const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    
-    // 7. OpenAI 규격 변환 반환
-    const openAiResponse = {
-      id: 'chatcmpl-' + Date.now(),
-      object: 'chat.completion',
-      created: Math.floor(Date.now() / 1000),
-      model: rawModel,
-      choices: [
-        {
-          index: 0,
-          message: {
-            role: 'assistant',
-            content: generatedText
-          },
-          finish_reason: 'stop'
-        }
-      ]
-    };
-
-    return res.status(200).json(openAiResponse);
+    // 6. 이미 OpenAI 호환 응답으로 넘어오므로 그대로 반환
+    return res.status(200).json(data);
 
   } catch (error) {
     return res.status(500).json({ error: error.message });
