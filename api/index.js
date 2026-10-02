@@ -11,13 +11,16 @@ export default async function handler(req, res) {
   try {
     const body = req.body || {};
     
-    // API Key 추출 (Authorization Bearer, x-goog-api-key, query parameter)
+    // API Key 추출 및 정제 (공백, 따옴표, Bearer 문구 제거)
     const authHeader = req.headers.authorization || '';
-    let apiKey = authHeader.replace('Bearer ', '').trim();
+    let apiKey = authHeader.replace(/^Bearer\s+/i, '').trim();
 
     if (!apiKey) {
       apiKey = req.headers['x-goog-api-key'] || req.query.key || '';
     }
+
+    // 따옴표나 불필요한 감싸는 문자 제거
+    apiKey = apiKey.replace(/^["']|["']$/g, '').trim();
 
     if (!apiKey) {
       return res.status(401).json({ error: "API Key가 전달되지 않았습니다." });
@@ -41,7 +44,7 @@ export default async function handler(req, res) {
       ]
     };
 
-    // Immersive Translate의 모델명에서 google/ 접두사만 깔끔히 제거 후 사용
+    // Immersive Translate의 모델명에서 google/ 접두사만 제거
     const rawModel = body.model || 'gemini-3.8-flash';
     const cleanModel = rawModel.replace(/^google\//i, '').trim();
 
@@ -71,7 +74,7 @@ export default async function handler(req, res) {
 
     const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     
-    // OpenAI 규격으로 포맷팅하여 Immersive Translate로 반환
+    // OpenAI 규격으로 포맷팅하여 반환
     const openAiResponse = {
       id: 'chatcmpl-' + Date.now(),
       object: 'chat.completion',
