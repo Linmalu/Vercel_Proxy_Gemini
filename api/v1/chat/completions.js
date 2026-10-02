@@ -11,9 +11,17 @@ export default async function handler(req, res) {
   try {
     const body = req.body || {};
     
-    // API Key 추출 (Authorization Bearer 토큰)
+    // API Key 추출 (Authorization Bearer, x-goog-api-key, Query parameter 순서로 확인)
     const authHeader = req.headers.authorization || '';
-    const apiKey = authHeader.replace('Bearer ', '').trim();
+    let apiKey = authHeader.replace('Bearer ', '').trim();
+
+    if (!apiKey) {
+      apiKey = req.headers['x-goog-api-key'] || req.query.key || '';
+    }
+
+    if (!apiKey) {
+      return res.status(401).json({ error: "API Key가 전달되지 않았습니다. Immersive Translate 설정의 API Key를 확인해주세요." });
+    }
 
     // OpenAI 형식의 messages를 Gemini 형식의 contents로 변환
     const contents = (body.messages || []).map(msg => ({
@@ -33,7 +41,7 @@ export default async function handler(req, res) {
       ]
     };
 
-    // Immersive Translate에서 요청한 모델명을 그대로 사용하거나, 기본값으로 gemini-3.8-flash 지정
+    // Immersive Translate에서 요청한 모델명 사용 또는 기본값 gemini-3.8-flash
     const modelName = body.model || 'gemini-3.8-flash';
     const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
