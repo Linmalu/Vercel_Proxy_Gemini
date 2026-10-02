@@ -19,7 +19,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // 2. API Key 추출 및 강력 정제 (Bearer, 따옴표, 양끝 공백 완전 제거)
+    // 2. API Key 추출
     const headers = req.headers || {};
     const authHeader = headers.authorization || headers.Authorization || '';
     
@@ -35,7 +35,7 @@ export default async function handler(req, res) {
       rawApiKey = req.query.key || req.query.api_key || req.query.apiKey;
     }
 
-    // "Bearer AIzaSy..." -> "AIzaSy..." (순수 키만 정제)
+    // 정제: Bearer, 따옴표, 공백 완전 제거
     let apiKey = rawApiKey
       .replace(/^Bearer\s+/i, '')
       .replace(/^["']|["']$/g, '')
@@ -65,7 +65,7 @@ export default async function handler(req, res) {
       ]
     };
 
-    // 5. 모델명 정제 (2.5 강제 치환 없이, google/ 접두사만 제거하여 요청받은 모델명 그대로 사용)
+    // 5. 모델명 정제 (google/ 접두사만 제거, 요청받은 모델명 그대로 사용)
     const rawModel = body.model || 'gemini-3.8-flash';
     const cleanModel = rawModel.replace(/^google\//i, '').trim();
 
@@ -92,7 +92,19 @@ export default async function handler(req, res) {
     }
 
     if (!response.ok) {
-      return res.status(response.status).json(data);
+      // 구글에서 400 등 에러 반환 시 디버깅을 위해 추출된 키의 일부 정보를 함께 응답에 포함
+      const maskedKey = apiKey.length > 8 
+        ? `${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}` 
+        : apiKey;
+
+      return res.status(response.status).json({
+        ...data,
+        debug_info: {
+          extracted_key_masked: maskedKey,
+          extracted_key_length: apiKey.length,
+          model_used: cleanModel
+        }
+      });
     }
 
     const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
