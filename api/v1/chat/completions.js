@@ -1,5 +1,5 @@
 export default async function handler(req, res) {
-  // CORS 및 OPTIONS 요청 처리
+  // CORS 및 Preflight 처리
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', '*');
@@ -11,7 +11,7 @@ export default async function handler(req, res) {
   try {
     const body = req.body || {};
 
-    // Gemini API 규격에 맞는 safetySettings 추가/강제 주입
+    // safetySettings 강제 주입
     body.safetySettings = [
       { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
       { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
@@ -20,18 +20,19 @@ export default async function handler(req, res) {
       { category: 'HARM_CATEGORY_CIVIC_INTEGRITY', threshold: 'BLOCK_NONE' }
     ];
 
-    // Vercel AI Gateway로 요청 전달 (API 키 및 헤더 유지)
-    const targetUrl = 'https://ai-gateway.vercel.sh/v1/chat/completions';
+    // 헤더에서 API 키 추출 (Authorization Bearer 또는 x-goog-api-key)
+    const authHeader = req.headers.authorization || '';
+    const apiKey = authHeader.replace('Bearer ', '').trim();
 
-    const headers = { ...req.headers };
-    delete headers.host;
-    delete headers['content-length'];
+    // Google Gemini API 원본 엔드포인트로 포워딩
+    const model = body.model || 'gemini-3.8-flash';
+    const targetUrl = `https://generativelanguage.googleapis.com/v1beta/chat/completions`;
 
     const response = await fetch(targetUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': req.headers.authorization || ''
+        'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify(body)
     });
