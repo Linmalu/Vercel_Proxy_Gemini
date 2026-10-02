@@ -9,7 +9,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1. 요청 Body 안전 파싱
+    // 1. 요청 Body 파싱
     let body = req.body || {};
     if (typeof body === 'string') {
       try {
@@ -19,7 +19,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // 2. API Key 추출
+    // 2. API Key (Vercel Key vck_...) 추출
     const headers = req.headers || {};
     const authHeader = headers.authorization || headers.Authorization || '';
     
@@ -35,7 +35,6 @@ export default async function handler(req, res) {
       rawApiKey = req.query.key || req.query.api_key || req.query.apiKey;
     }
 
-    // 정제: Bearer, 따옴표, 공백 완전 제거
     let apiKey = rawApiKey
       .replace(/^Bearer\s+/i, '')
       .replace(/^["']|["']$/g, '')
@@ -43,7 +42,7 @@ export default async function handler(req, res) {
 
     if (!apiKey) {
       return res.status(401).json({ 
-        error: "API Key를 찾을 수 없습니다. Immersive Translate의 API Key 설정을 확인해주세요." 
+        error: "API Key(vck_...)가 전달되지 않았습니다." 
       });
     }
 
@@ -65,17 +64,19 @@ export default async function handler(req, res) {
       ]
     };
 
-    // 5. 모델명 정제 (google/ 접두사만 제거, 요청받은 모델명 그대로 사용)
+    // 5. 모델명 정제 (google/ 접두사 제거)
     const rawModel = body.model || 'gemini-3.8-flash';
     const cleanModel = rawModel.replace(/^google\//i, '').trim();
 
-    // 6. Google Gemini API 호출
-    const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
+    // 6. Vercel AI Gateway 엔드포인트 호출 (vck_... 키 적용)
+    // Vercel AI Gateway를 거쳐 Google Gemini로 안전하게 포워딩됩니다.
+    const targetUrl = `https://ai.vercel.dev/v1/models/${cleanModel}:generateContent`;
 
     const response = await fetch(targetUrl, {
       method: 'POST',
       headers: { 
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify(geminiPayload)
     });
@@ -86,30 +87,18 @@ export default async function handler(req, res) {
       data = JSON.parse(rawText);
     } catch (e) {
       return res.status(response.status || 500).json({
-        error: `Google Gemini API 응답 파싱 실패 (${response.status})`,
+        error: `Vercel Gateway 응답 파싱 실패 (${response.status})`,
         rawResponseBody: rawText
       });
     }
 
     if (!response.ok) {
-      // 구글에서 400 등 에러 반환 시 디버깅을 위해 추출된 키의 일부 정보를 함께 응답에 포함
-      const maskedKey = apiKey.length > 8 
-        ? `${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}` 
-        : apiKey;
-
-      return res.status(response.status).json({
-        ...data,
-        debug_info: {
-          extracted_key_masked: maskedKey,
-          extracted_key_length: apiKey.length,
-          model_used: cleanModel
-        }
-      });
+      return res.status(response.status).json(data);
     }
 
     const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     
-    // 7. OpenAI 규격으로 변환하여 반환
+    // 7. OpenAI 규격 변환 반환
     const openAiResponse = {
       id: 'chatcmpl-' + Date.now(),
       object: 'chat.completion',
