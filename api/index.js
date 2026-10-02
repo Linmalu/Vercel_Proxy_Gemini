@@ -1,4 +1,5 @@
 export default async function handler(req, res) {
+  // CORS 및 Preflight 헤더 설정
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', '*');
@@ -22,13 +23,13 @@ export default async function handler(req, res) {
       return res.status(401).json({ error: "API Key가 전달되지 않았습니다." });
     }
 
-    // OpenAI messages -> Gemini contents 변환
+    // OpenAI messages -> Gemini contents 규격 변환
     const contents = (body.messages || []).map(msg => ({
       role: msg.role === 'user' ? 'user' : 'model',
       parts: [{ text: msg.content || '' }]
     }));
 
-    // Gemini Native 규격 payload
+    // Gemini Native 규격 payload (safetySettings BLOCK_NONE 적용)
     const geminiPayload = {
       contents: contents.length > 0 ? contents : [{ parts: [{ text: "Hello" }] }],
       safetySettings: [
@@ -40,9 +41,11 @@ export default async function handler(req, res) {
       ]
     };
 
-    // Immersive Translate에서 지정한 모델명 사용
-    const modelName = body.model || 'gemini-1.5-flash';
-    const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+    // Immersive Translate의 모델명에서 google/ 접두사만 깔끔히 제거 후 사용
+    const rawModel = body.model || 'gemini-3.8-flash';
+    const cleanModel = rawModel.replace(/^google\//i, '').trim();
+
+    const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
 
     const response = await fetch(targetUrl, {
       method: 'POST',
@@ -50,14 +53,14 @@ export default async function handler(req, res) {
       body: JSON.stringify(geminiPayload)
     });
 
-    // 텍스트로 먼저 받아본 뒤 파싱 (Unexpected end of JSON 방지)
     const rawText = await response.text();
     let data;
     try {
       data = JSON.parse(rawText);
     } catch (e) {
       return res.status(response.status || 500).json({
-        error: "Gemini API 응답 파싱 실패",
+        error: `Google Gemini API 호출 실패 (${response.status})`,
+        modelUsed: cleanModel,
         rawResponseBody: rawText
       });
     }
@@ -68,11 +71,12 @@ export default async function handler(req, res) {
 
     const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     
+    // OpenAI 규격으로 포맷팅하여 Immersive Translate로 반환
     const openAiResponse = {
       id: 'chatcmpl-' + Date.now(),
       object: 'chat.completion',
       created: Math.floor(Date.now() / 1000),
-      model: modelName,
+      model: rawModel,
       choices: [
         {
           index: 0,
